@@ -148,6 +148,9 @@ final class HeadsetStateMachine extends StateMachine {
         BluetoothUuid.Handsfree,
     };
 
+    private static final String ACTION_VOICE_COMMAND_STOP =
+            "com.android.internal.intent.action.VOICE_COMMAND_STOP";
+
     private Disconnected mDisconnected;
     private Pending mPending;
     private Connected mConnected;
@@ -165,6 +168,7 @@ final class HeadsetStateMachine extends StateMachine {
     private AtPhonebook mPhonebook;
 
     private static Intent sVoiceCommandIntent;
+    private static Intent sVoiceCommandStopIntent;
 
     private HeadsetPhoneState mPhoneState;
     private int mAudioState;
@@ -251,6 +255,9 @@ final class HeadsetStateMachine extends StateMachine {
             sVoiceCommandIntent = new Intent(Intent.ACTION_VOICE_COMMAND);
             sVoiceCommandIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         }
+        if (sVoiceCommandStopIntent == null) {
+            sVoiceCommandStopIntent = new Intent(ACTION_VOICE_COMMAND_STOP);
+        }
         if (context.getPackageManager().resolveActivity(sVoiceCommandIntent,0) != null
             && BluetoothHeadset.isBluetoothVoiceDialingEnabled(context)) {
             mLocalBrsf |= BRSF_AG_VOICE_RECOG;
@@ -269,6 +276,7 @@ final class HeadsetStateMachine extends StateMachine {
         addState(mAudioOn);
 
         setInitialState(mDisconnected);
+        mPhoneState.listenForPhoneState(true);
     }
 
     static HeadsetStateMachine make(HeadsetService context) {
@@ -1092,6 +1100,14 @@ final class HeadsetStateMachine extends StateMachine {
         public void onServiceConnected(ComponentName className, IBinder service) {
             if (DBG) Log.d(TAG, "Proxy object connected");
             mPhoneProxy = IBluetoothHeadsetPhone.Stub.asInterface(service);
+            if (mPhoneProxy != null) {
+                try {
+                    log("Try to query the phonestate on bind");
+                    mPhoneProxy.queryPhoneState();
+                } catch (RemoteException e) {
+                    Log.e(TAG, Log.getStackTraceString(new Throwable()));
+                }
+            } else Log.e(TAG, " phone proxy null for query phone state");
         }
 
         public void onServiceDisconnected(ComponentName className) {
@@ -1197,6 +1213,7 @@ final class HeadsetStateMachine extends StateMachine {
                 atResponseCodeNative(HeadsetHalConstants.AT_RESPONSE_OK, 0);
                 mVoiceRecognitionStarted = false;
                 mWaitingForVoiceRecognition = false;
+                mService.sendBroadcast(sVoiceCommandStopIntent);
                 if (!isInCall()) {
                     disconnectAudioNative(getByteAddress(mCurrentDevice));
                     mAudioManager.setParameters("A2dpSuspended=false");
